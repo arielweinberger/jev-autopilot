@@ -65,15 +65,19 @@ function describe(t: Telemetry) {
         (maneuverWord ? `Planned maneuver: ${maneuverWord}.` : 'No maneuver chosen yet.');
 
   const room = t.distanceToStopLine - t.stoppingDistance;
+  const dsl = t.distanceToStopLine;
   const lightWords =
-    t.light === null || t.inIntersection || t.distanceToStopLine < 0
+    t.light === null || t.inIntersection || dsl < 0
       ? 'no traffic light applies right now'
       : t.light === 'green'
-        ? `the traffic light facing the car is GREEN, ${r(t.distanceToStopLine)} m ahead: proceed`
-        : room > 30
-          ? `the traffic light facing the car is ${t.light.toUpperCase()} but still far away, ${r(t.distanceToStopLine)} m ahead. Braking is not needed yet: keep driving toward it at a moderate speed and it may change before the car arrives`
-          : `the traffic light facing the car is ${t.light.toUpperCase()}, ${r(t.distanceToStopLine)} m ahead. The car needs about ${r(t.stoppingDistance)} m to stop, so ` +
-            (room > 8 ? 'there is room: brake gently and stop before the line' : room > 0 ? 'it must brake firmly now to stop before the line' : 'it is too late to stop before the line');
+        ? `the traffic light facing the car is GREEN, ${r(dsl)} m ahead: proceed`
+        : dsl < 3
+          ? `the car is AT the stop line and the light is ${t.light.toUpperCase()}: hold the brake and wait here`
+          : room > 30
+            ? `the light ahead is ${t.light.toUpperCase()}, but the stop line is still FAR: ${r(dsl)} m away. Do not stop here. Keep driving toward the line at the speed given in \`speed\`; it may turn green before the car arrives`
+            : room > 3
+              ? `the light ahead is ${t.light.toUpperCase()} and the stop line is ${r(dsl)} m away. Roll up to the line and stop exactly AT it, not before it. ${t.speedKmh < 3 ? `The car is stopped ${r(dsl)} m short of the line: creep forward` : 'Brake gently so the car comes to rest at the line'}`
+              : `the light ahead is ${t.light.toUpperCase()} and the stop line is only ${r(dsl)} m away: brake firmly now to stop at the line`;
 
   const ahead = t.destBlocksAhead, rgt = t.destBlocksRight;
   const dirWords =
@@ -135,7 +139,7 @@ export function createPilotHandler(apiKey: string | undefined) {
       pedal: {
         type: 'choice' as const,
         instructions:
-          'Which pedal input is right now? `speed` states the right speed for this spot and whether the car is too slow, too fast, or about right: follow that verdict. Too slow means gas; too fast means brake; about right means coast or a touch of gas to hold speed; must stop means brake. Use `trafficLight` and `destination` to judge how hard: brake hard only when a stop is close, accelerate hard only on a clear straight road well below the limit.',
+          'Which pedal input is right now? `speed` states the right speed for this spot and whether the car is too slow, too fast, or about right: follow that verdict. Too slow means gas; too fast means brake; about right means coast or a touch of gas to hold speed; must stop means brake. A red light means stop AT the stop line, not as soon as the light is visible: while `trafficLight` says the line is still far or asks the car to creep forward, keep moving. Brake hard only when `trafficLight` or `destination` says a stop is close, and accelerate hard only on a clear straight road well below the limit.',
         criteria: {
           accelerate_hard: 'Press the gas fully. The road ahead is clear, the light is green or absent, no turn or destination is near, and the car is well below the limit.',
           accelerate: 'Press the gas gently. Keep speed up on a clear road near the limit, or move off from a stop, or roll through a green intersection.',

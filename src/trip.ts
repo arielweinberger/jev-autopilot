@@ -107,8 +107,9 @@ export class Trip {
     const inside = this.insideNode !== null;
     const turning = this.committed === 'turn_left' || this.committed === 'turn_right';
     const destAhead = onDestStreet && along > -4 ? along : null;
-    // Comfortable speed to reach a stop `dist` meters ahead at 2 m/s², capped when close.
-    const stopSpeed = (dist: number) => (dist < 2.5 ? 0 : Math.min(50, dist < 25 ? 20 : 50, Math.sqrt(2 * 2 * Math.max(0, dist - 1.5)) * 3.6));
+    // Comfortable speed to reach a stop `dist` meters ahead at 2 m/s², capped when close,
+    // with a creep floor so the car rolls right up to the line instead of stopping early.
+    const stopSpeed = (dist: number) => (dist < 2.5 ? 0 : Math.max(8, Math.min(50, dist < 25 ? 20 : 50, Math.sqrt(2 * 2 * Math.max(0, dist - 1.5)) * 3.6)));
     let advised = 50;
     if (destAhead !== null) advised = stopSpeed(destAhead);
     else if (light !== null && light !== 'green' && !inside && distanceToStopLine > -1) advised = Math.min(advised, stopSpeed(distanceToStopLine));
