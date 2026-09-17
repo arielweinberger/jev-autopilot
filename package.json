@@ -1,12 +1,13 @@
 {
   "name": "jev-autopilot",
   "version": "1.0.0",
-  "description": "3D drone simulator with DJI-style controls, flown autonomously by TypeSafe Jev through the AI SDK",
+  "description": "3D driving simulator through a generated city, driven autonomously by TypeSafe Jev through the AI SDK",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "headless": "tsx scripts/headless.ts"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@types/node": "^26.6.1",
     "@types/three": "^0.186.0",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
   },

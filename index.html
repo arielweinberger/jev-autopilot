@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Drone Sim · Jev Autopilot</title>
+    <title>Driving Sim · Jev Autopilot</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -11,70 +11,44 @@
 
     <div id="hud">
       <div id="telemetry" class="panel">
-        <div class="row"><span>ALT</span><b id="t-alt">0.0</b><i>m</i></div>
-        <div class="row"><span>V/S</span><b id="t-vs">0.0</b><i>m/s</i></div>
-        <div class="row"><span>SPD</span><b id="t-spd">0.0</b><i>m/s</i></div>
+        <div class="row"><span>SPEED</span><b id="t-spd">0</b><i>km/h</i></div>
+        <div class="row"><span>LIGHT</span><b id="t-light">–</b><i></i></div>
+        <div class="row"><span>NEXT</span><b id="t-next">–</b><i></i></div>
         <div class="row"><span>DIST</span><b id="t-dist">0</b><i>m</i></div>
-        <div class="row"><span>HDG</span><b id="t-hdg">000</b><i>°</i></div>
-        <div class="row"><span>PHASE</span><b id="t-phase">grounded</b><i></i></div>
+        <div class="row"><span>PHASE</span><b id="t-phase">ready</b><i></i></div>
+        <div class="row"><span>RED RUN</span><b id="t-reds">0</b><i></i></div>
       </div>
 
-      <div id="compass">
-        <div id="compass-arrow">▲</div>
-        <div id="compass-label">PAD</div>
-      </div>
+      <canvas id="minimap" width="200" height="200"></canvas>
 
       <div id="center-msg"></div>
-      <div id="crosshair"></div>
 
       <div id="mode-panel" class="panel">
         <div id="mode-title">MANUAL</div>
         <div class="hint">
           <b>J</b> Jev autopilot · <b>R</b> reset<br />
-          <b>W/S</b> throttle · <b>A/D</b> yaw · <b>↑↓</b> pitch · <b>←→</b> roll<br />
+          <b>W</b> gas · <b>S</b> brake · <b>A/D</b> steer<br />
           map seed <b id="seed">–</b> · refresh for a new city
         </div>
         <div id="jev" hidden>
-          <div class="jev-head">
-            <span class="dot"></span> Jev · <span id="jev-latency">–</span> ms · <span id="jev-tokens">–</span> tok
-          </div>
+          <div class="jev-head"><span class="dot"></span> Jev · <span id="jev-latency">–</span> ms · <span id="jev-tokens">–</span> tok</div>
           <div id="jev-answers"></div>
           <div id="jev-stats"></div>
         </div>
       </div>
 
       <div id="rc">
-        <div class="rc-top">
-          <span class="rc-brand">RC</span>
-          <span class="rc-mode">MODE 2</span>
-          <span class="rc-led" id="rc-led"></span>
-        </div>
-        <div class="rc-sticks">
-          <div class="gimbal">
-            <div class="gimbal-ring"></div>
-            <div class="gimbal-cross"></div>
-            <div class="knob" id="knob-left"></div>
-            <div class="lbl lbl-top">THR ▲</div>
-            <div class="lbl lbl-bottom">▼</div>
-            <div class="lbl lbl-left">◀ YAW</div>
-            <div class="lbl lbl-right">▶</div>
+        <div class="rc-top"><span class="rc-brand">DRIVER</span><span class="rc-mode">RHD TRAFFIC · AUTO GEARBOX</span><span class="rc-led" id="rc-led"></span></div>
+        <div class="rc-body">
+          <div class="wheel-wrap">
+            <div id="wheel"><div class="spoke s1"></div><div class="spoke s2"></div><div class="spoke s3"></div><div class="hub"></div><div class="top-mark"></div></div>
           </div>
-          <div class="gimbal">
-            <div class="gimbal-ring"></div>
-            <div class="gimbal-cross"></div>
-            <div class="knob" id="knob-right"></div>
-            <div class="lbl lbl-top">PITCH ▲</div>
-            <div class="lbl lbl-bottom">▼</div>
-            <div class="lbl lbl-left">◀ ROLL</div>
-            <div class="lbl lbl-right">▶</div>
+          <div class="pedals">
+            <div class="pedal"><div class="pedal-track"><div class="pedal-fill brk" id="pedal-brk"></div></div><span>BRAKE</span></div>
+            <div class="pedal"><div class="pedal-track"><div class="pedal-fill thr" id="pedal-thr"></div></div><span>GAS</span></div>
           </div>
         </div>
-        <div class="rc-readout">
-          <span>T <b id="rc-t">0.00</b></span>
-          <span>Y <b id="rc-y">0.00</b></span>
-          <span>P <b id="rc-p">0.00</b></span>
-          <span>R <b id="rc-r">0.00</b></span>
-        </div>
+        <div class="rc-readout"><span>STEER <b id="rc-s">0.00</b></span><span>GAS <b id="rc-t">0.00</b></span><span>BRAKE <b id="rc-b">0.00</b></span></div>
       </div>
     </div>
 

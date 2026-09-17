@@ -1,74 +1,67 @@
-/** Stick deflections, DJI Mode 2. All values in [-1, 1]. */
-export interface Sticks {
-  /** Left stick vertical. +1 = climb, -1 = descend, 0 = hold altitude. */
+/** Driver inputs. */
+export interface Controls {
+  /** -1 = full left, +1 = full right. */
+  steer: number;
+  /** 0..1 accelerator pedal. */
   throttle: number;
-  /** Left stick horizontal. +1 = yaw right (clockwise from above). */
-  yaw: number;
-  /** Right stick vertical. +1 = pitch forward (nose down, fly forward). */
-  pitch: number;
-  /** Right stick horizontal. +1 = roll right (fly right). */
-  roll: number;
+  /** 0..1 brake pedal. */
+  brake: number;
 }
 
-export type Phase = 'grounded' | 'airborne' | 'landed' | 'crashed';
+export type Phase = 'ready' | 'driving' | 'arrived' | 'crashed';
+export type Maneuver = 'turn_left' | 'go_straight' | 'turn_right';
+export type LightState = 'green' | 'yellow' | 'red';
 
-/** Telemetry sent to the autopilot. Everything is pre-computed in code. */
+/** Everything the autopilot is told. All numbers are pre-computed by code. */
 export interface Telemetry {
   phase: Phase;
-  /** Height above ground, meters. */
-  altitude: number;
-  /** Vertical speed, m/s. Positive = climbing. */
-  verticalSpeed: number;
-  /** Horizontal ground speed, m/s. */
-  groundSpeed: number;
-  /** Horizontal distance from drone to landing pad center, meters. */
-  distanceToPad: number;
-  /** Signed angle from the drone's nose to the pad, degrees. Positive = pad is to the right. */
-  bearingToPad: number;
-  /** Pad position in the drone's body frame, meters. */
-  padForward: number;
-  padRight: number;
-  /** Velocity in the drone's body frame, m/s. */
-  velocityForward: number;
-  velocityRight: number;
-  /** Nearest obstacle within a forward cone, meters, or null. */
-  obstacleAhead: number | null;
-  /** Height of the tallest building near the direct path, meters. */
-  tallestObstacleOnPath: number;
-  /** Suggested cruise altitude, meters. */
-  cruiseAltitude: number;
-  /** Radius of the landing pad, meters. */
-  padRadius: number;
+  speedKmh: number;
+  /** Speed code considers right for this spot: cruise, slower for a turn, zero at a red light or the destination. */
+  advisedSpeedKmh: number;
+  /** Distance the car needs to come to a stop from its current speed, meters. */
+  stoppingDistance: number;
+  /** Lateral distance from the lane center, meters. Positive = car is right of center. */
+  laneOffset: number;
+  /** Angle between the car's heading and the lane direction, degrees. Positive = pointing right. */
+  headingError: number;
+  /** Where the lane center is 10 m ahead, in the car's frame. Positive right = lane bends right. */
+  lookaheadRight: number;
+  /** Same, 22 m ahead. */
+  lookaheadFarRight: number;
+  /** Meters to the stop line of the next intersection along the road. Negative once past it. */
+  distanceToStopLine: number;
+  inIntersection: boolean;
+  /** Which exits the next intersection has. */
+  exits: { left: boolean; straight: boolean; right: boolean };
+  /** Maneuver already committed for the next intersection, if any. */
+  plannedManeuver: Maneuver | null;
+  /** Traffic light facing the car at the next intersection, if there is one. */
+  light: LightState | null;
+  /** Destination position in the car's frame, in blocks (one block = one intersection spacing). */
+  destBlocksAhead: number;
+  destBlocksRight: number;
+  /** Straight-line distance to the destination, meters. */
+  distanceToDestination: number;
+  /** If the destination is on the road the car is currently on, its distance ahead along the road. */
+  destinationAheadOnThisRoad: number | null;
+  redLightsRun: number;
 }
 
-export const THROTTLE_OPTIONS = {
-  climb_fast: 1,
-  climb: 0.5,
-  hold_altitude: 0,
-  descend: -0.25,
-  descend_fast: -0.7,
+export const STEER_OPTIONS = {
+  hard_left: -1,
+  left: -0.4,
+  straight: 0,
+  right: 0.4,
+  hard_right: 1,
 } as const;
 
-export const YAW_OPTIONS = {
-  turn_left_hard: -1,
-  turn_left: -0.25,
-  hold_heading: 0,
-  turn_right: 0.25,
-  turn_right_hard: 1,
-} as const;
-
-export const PITCH_OPTIONS = {
-  full_forward: 1,
-  forward: 0.5,
-  neutral: 0,
-  pull_back: -0.5,
+/** Pedal choices on one axis: positive = gas, negative = brake. Never both at once. */
+export const PEDAL_OPTIONS = {
+  accelerate_hard: 1,
+  accelerate: 0.45,
+  coast: 0,
+  brake: -0.45,
   brake_hard: -1,
-} as const;
-
-export const ROLL_OPTIONS = {
-  slide_left: -0.5,
-  neutral: 0,
-  slide_right: 0.5,
 } as const;
 
 export interface ChoiceAnswer<K extends string> {
@@ -78,20 +71,17 @@ export interface ChoiceAnswer<K extends string> {
 }
 
 export interface PilotAnswers {
-  throttle: ChoiceAnswer<keyof typeof THROTTLE_OPTIONS>;
-  yaw: ChoiceAnswer<keyof typeof YAW_OPTIONS>;
-  pitch: ChoiceAnswer<keyof typeof PITCH_OPTIONS>;
-  roll: ChoiceAnswer<keyof typeof ROLL_OPTIONS>;
-  /** Probability that the drone should commit to landing now. */
-  commitToLanding: number;
-  /** Probability that the drone is down on the pad and motors should stop. */
-  cutMotors: number;
+  steer: ChoiceAnswer<keyof typeof STEER_OPTIONS>;
+  pedal: ChoiceAnswer<keyof typeof PEDAL_OPTIONS>;
+  /** Only present when the car is approaching an intersection with no committed maneuver. */
+  maneuver?: ChoiceAnswer<Maneuver>;
+  /** Probability that the trip is complete: stopped at the destination. */
+  arrived: number;
 }
 
 export interface PilotResponse {
   answers: PilotAnswers;
   usage: { inputTokens?: number; outputTokens?: number };
   latencyMs: number;
-  /** Echo of the situation report Jev was shown, for the HUD. */
   situation: Record<string, unknown>;
 }

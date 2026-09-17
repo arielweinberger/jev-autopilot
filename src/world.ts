@@ -1,190 +1,186 @@
 import * as THREE from 'three';
+import { RoadNetwork, SPACING, ROAD_HALF, ISEC_HALF, STOP_LINE, GRID, rightOf, pickTrip, type Vec2 } from './roads';
 
-export interface Building {
-  box: THREE.Box3;
-  height: number;
-}
+export interface Building { box: THREE.Box3; height: number }
 
 export interface World {
   scene: THREE.Scene;
-  launchPad: THREE.Vector3;
-  landingPad: THREE.Vector3;
-  padRadius: number;
+  net: RoadNetwork;
   buildings: Building[];
-  /** Layout seed; pass as ?seed= to reproduce this map. */
   seed: number;
+  /** Start street (u -> v) and destination street (p, q) with the marker at its midpoint. */
+  start: { u: number; v: number };
+  dest: { p: number; q: number; pos: Vec2 };
+  /** Call every frame to animate the traffic lights. */
+  updateLights(t: number): void;
 }
 
-const PAD_RADIUS = 4;
-
-function makeGroundTexture(): THREE.Texture {
-  const size = 512;
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#2f5d34';
-  ctx.fillRect(0, 0, size, size);
-  // subtle noise
-  for (let i = 0; i < 4000; i++) {
-    ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.12})`;
-    ctx.fillRect(Math.random() * size, Math.random() * size, 3, 3);
-  }
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-  ctx.lineWidth = 2;
-  for (let i = 0; i <= size; i += 64) {
-    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, size); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(40, 40);
-  tex.anisotropy = 8;
-  return tex;
-}
-
-function makePad(color: number, label: string): THREE.Group {
-  const g = new THREE.Group();
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(PAD_RADIUS, PAD_RADIUS, 0.2, 48),
-    new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.9 }),
-  );
-  base.position.y = 0.1;
-  base.receiveShadow = true;
-  g.add(base);
-
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(PAD_RADIUS - 0.5, PAD_RADIUS - 0.1, 64),
-    new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }),
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.21;
-  g.add(ring);
-
-  // Letter marker painted on the pad
+function groundTexture(): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
-  ctx.font = 'bold 200px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, 128, 138);
-  const tex = new THREE.CanvasTexture(c);
-  const letter = new THREE.Mesh(
-    new THREE.PlaneGeometry(PAD_RADIUS, PAD_RADIUS),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true }),
-  );
-  letter.rotation.x = -Math.PI / 2;
-  letter.position.y = 0.22;
-  g.add(letter);
-
-  // Light beacon pillar so the pad is visible from a distance
-  const beacon = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.15, 0.6, 60, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }),
-  );
-  beacon.position.y = 30;
-  g.add(beacon);
-
-  const light = new THREE.PointLight(color, 40, 30);
-  light.position.y = 2;
-  g.add(light);
-  return g;
+  ctx.fillStyle = '#4f7a3a';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 1500; i++) { ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.1})`; ctx.fillRect(Math.random() * 256, Math.random() * 256, 3, 3); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(60, 60);
+  return t;
 }
 
 export function createWorld(): World {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87b4d8);
-  scene.fog = new THREE.Fog(0x9cc3e0, 120, 420);
+  const params = new URLSearchParams(location.search);
+  const seedParam = Number(params.get('seed'));
+  const seed = Number.isFinite(seedParam) && seedParam > 0 ? Math.floor(seedParam) : 1 + Math.floor(Math.random() * 2147483646);
+  const net = new RoadNetwork(seed);
+  const rand = () => net.random();
 
-  const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x3b4a2f, 1.1);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff2d6, 2.2);
-  sun.position.set(80, 140, 60);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x8fb8dc);
+  scene.fog = new THREE.Fog(0x9fc4e2, 150, 520);
+  scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a5a3a, 1.0));
+  const sun = new THREE.DirectionalLight(0xfff1d9, 2.0);
+  sun.position.set(120, 180, 80);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = sun.shadow.camera.bottom = -200;
-  sun.shadow.camera.right = sun.shadow.camera.top = 200;
-  sun.shadow.camera.far = 400;
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -320;
+  sun.shadow.camera.right = sun.shadow.camera.top = 320;
+  sun.shadow.camera.far = 600;
   scene.add(sun);
 
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(800, 800),
-    new THREE.MeshStandardMaterial({ map: makeGroundTexture(), roughness: 1 }),
-  );
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 1 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const launchPad = new THREE.Vector3(0, 0, 0);
-  const landingPad = new THREE.Vector3(150, 0, -120);
-
-  const padA = makePad(0x3ddc97, 'A');
-  padA.position.copy(launchPad);
-  scene.add(padA);
-  const padB = makePad(0xff8a3d, 'B');
-  padB.position.copy(landingPad);
-  scene.add(padB);
-
-  // Random city layout, new on every refresh. Pin one with ?seed=123.
-  const params = new URLSearchParams(location.search);
-  const seedParam = Number(params.get('seed'));
-  let seed = Number.isFinite(seedParam) && seedParam > 0 ? Math.floor(seedParam) : 1 + Math.floor(Math.random() * 2147483646);
-  const layoutSeed = seed;
-  const rand = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
-
-  const MAP_HALF = 210; // buildings and trees live inside ±MAP_HALF
-  const PAD_CLEAR = 22; // radius around each pad kept free of buildings
-  const footprints: { x: number; z: number; w: number; d: number }[] = [];
-  const overlaps = (x: number, z: number, w: number, d: number, margin: number) =>
-    footprints.some((f) => Math.abs(f.x - x) < (f.w + w) / 2 + margin && Math.abs(f.z - z) < (f.d + d) / 2 + margin);
-  const nearPad = (x: number, z: number, r: number) =>
-    Math.hypot(x - launchPad.x, z - launchPad.z) < r || Math.hypot(x - landingPad.x, z - landingPad.z) < r;
-
-  const buildings: Building[] = [];
-  const palette = [0x8d99ae, 0xb8c0cc, 0x6d7a8c, 0xa3adba, 0x5c6b7a, 0x9aa5b1];
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  const targetCount = 110 + Math.floor(rand() * 40);
-  for (let attempt = 0; attempt < 4000 && buildings.length < targetCount; attempt++) {
-    const w = 7 + rand() * 12;
-    const d = 7 + rand() * 12;
-    const x = (rand() - 0.5) * 2 * MAP_HALF;
-    const z = (rand() - 0.5) * 2 * MAP_HALF;
-    if (nearPad(x, z, PAD_CLEAR + Math.max(w, d) / 2)) continue;
-    if (overlaps(x, z, w, d, 4)) continue;
-    const h = 6 + rand() * rand() * 36;
-    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: palette[Math.floor(rand() * palette.length)], roughness: 0.8 }));
-    m.scale.set(w, h, d);
-    m.position.set(x, h / 2, z);
-    m.castShadow = m.receiveShadow = true;
+  // Roads
+  const asphalt = new THREE.MeshStandardMaterial({ color: 0x2b2d31, roughness: 0.95 });
+  const white = new THREE.MeshBasicMaterial({ color: 0xe8e8e8 });
+  const yellow = new THREE.MeshBasicMaterial({ color: 0xe6c440 });
+  const flat = (w: number, l: number, mat: THREE.Material, x: number, z: number, y: number, rotY = 0) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l), mat);
+    m.rotation.x = -Math.PI / 2;
+    m.rotation.z = rotY;
+    m.position.set(x, y, z);
+    m.receiveShadow = true;
     scene.add(m);
-    buildings.push({ box: new THREE.Box3().setFromObject(m), height: h });
-    footprints.push({ x, z, w, d });
+    return m;
+  };
+  for (const [a, b] of net.edges()) {
+    const A = net.node(a).pos, B = net.node(b).pos;
+    const d = net.dir(a, b);
+    const mid = { x: (A.x + B.x) / 2, z: (A.z + B.z) / 2 };
+    const L = SPACING;
+    const rot = d.x !== 0 ? Math.PI / 2 : 0;
+    flat(ROAD_HALF * 2, L, asphalt, mid.x, mid.z, 0.02, rot);
+    // edge lines and dashed center line (between the intersections only)
+    const inner = L - 2 * ISEC_HALF;
+    const r = rightOf(d);
+    flat(0.2, inner, white, mid.x + r.x * (ROAD_HALF - 0.3), mid.z + r.z * (ROAD_HALF - 0.3), 0.03, rot);
+    flat(0.2, inner, white, mid.x - r.x * (ROAD_HALF - 0.3), mid.z - r.z * (ROAD_HALF - 0.3), 0.03, rot);
+    for (let s = -inner / 2 + 2; s < inner / 2 - 2; s += 6) flat(0.2, 3, yellow, mid.x + d.x * s, mid.z + d.z * s, 0.03, rot);
+  }
+  // Intersections, stop lines and traffic lights
+  const lightBulbs: { mesh: THREE.Mesh; node: number; dir: Vec2; color: 'green' | 'yellow' | 'red' }[] = [];
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x33363b });
+  const bulbOff = { green: 0x0e3a1c, yellow: 0x4a3c0a, red: 0x3d0d0d } as const;
+  const bulbOn = { green: 0x3ddc63, yellow: 0xffc830, red: 0xff3b3b } as const;
+  for (const n of net.nodes) {
+    if (net.adj.get(n.id)!.size === 0) continue;
+    flat(ISEC_HALF * 2, ISEC_HALF * 2, asphalt, n.pos.x, n.pos.z, 0.025);
+    for (const m of net.adj.get(n.id)!) {
+      const d = net.dir(m, n.id); // direction of traffic arriving at n from m
+      const r = rightOf(d);
+      const sl = { x: n.pos.x - d.x * STOP_LINE, z: n.pos.z - d.z * STOP_LINE };
+      // stop line across the arriving lane
+      flat(ROAD_HALF, 0.4, white, sl.x + r.x * (ROAD_HALF / 2), sl.z + r.z * (ROAD_HALF / 2), 0.03, d.x !== 0 ? Math.PI / 2 : 0);
+      if (!n.hasLight) continue;
+      const px = sl.x + r.x * (ROAD_HALF + 1.2), pz = sl.z + r.z * (ROAD_HALF + 1.2);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 5.5, 8), poleMat);
+      pole.position.set(px, 2.75, pz);
+      scene.add(pole);
+      const housing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.6, 0.5), poleMat);
+      housing.position.set(px, 4.8, pz);
+      scene.add(housing);
+      (['red', 'yellow', 'green'] as const).forEach((color, k) => {
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 10), new THREE.MeshBasicMaterial({ color: bulbOff[color] }));
+        // bulbs face the arriving traffic
+        bulb.position.set(px - d.x * 0.3, 5.3 - k * 0.5, pz - d.z * 0.3);
+        scene.add(bulb);
+        lightBulbs.push({ mesh: bulb, node: n.id, dir: d, color });
+      });
+    }
   }
 
-  // Trees: never inside or touching a building, never on a pad, never on top of each other.
-  const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 2, 6);
-  const crownGeo = new THREE.ConeGeometry(1.6, 4, 7);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5b3a1e });
-  const crownMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32 });
-  const trees: { x: number; z: number }[] = [];
-  const treeTarget = 140;
-  for (let attempt = 0; attempt < 3000 && trees.length < treeTarget; attempt++) {
-    const x = (rand() - 0.5) * 2 * MAP_HALF;
-    const z = (rand() - 0.5) * 2 * MAP_HALF;
-    if (nearPad(x, z, PAD_RADIUS + 4)) continue;
-    if (overlaps(x, z, 3.2, 3.2, 1.5)) continue;
-    if (trees.some((t) => Math.hypot(t.x - x, t.z - z) < 4)) continue;
-    const t = new THREE.Mesh(trunkGeo, trunkMat);
-    t.position.set(x, 1, z);
-    const cr = new THREE.Mesh(crownGeo, crownMat);
-    cr.position.set(x, 4, z);
-    cr.castShadow = true;
-    scene.add(t, cr);
-    trees.push({ x, z });
+  // Buildings inside each block, never overlapping each other or the roads
+  const buildings: Building[] = [];
+  const palette = [0x8d99ae, 0xb8c0cc, 0x6d7a8c, 0xa3adba, 0x5c6b7a, 0xc9b79c, 0x9c8d7a];
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const half = (GRID - 1) / 2;
+  const cells: { x: number; z: number; w: number; d: number }[] = [];
+  for (let j = -1; j < GRID; j++) for (let i = -1; i < GRID; i++) {
+    const cx = (i + 0.5 - half) * SPACING, cz = (j + 0.5 - half) * SPACING;
+    const inner = SPACING / 2 - ROAD_HALF - 5;
+    const count = 2 + Math.floor(rand() * 4);
+    for (let k = 0, tries = 0; k < count && tries < 40; tries++) {
+      const w = 10 + rand() * 16, d = 10 + rand() * 16;
+      const x = cx + (rand() - 0.5) * 2 * (inner - w / 2), z = cz + (rand() - 0.5) * 2 * (inner - d / 2);
+      if (cells.some((c) => Math.abs(c.x - x) < (c.w + w) / 2 + 3 && Math.abs(c.z - z) < (c.d + d) / 2 + 3)) continue;
+      const h = 5 + rand() * rand() * 30;
+      const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: palette[Math.floor(rand() * palette.length)], roughness: 0.85 }));
+      m.scale.set(w, h, d);
+      m.position.set(x, h / 2, z);
+      m.castShadow = m.receiveShadow = true;
+      scene.add(m);
+      buildings.push({ box: new THREE.Box3().setFromObject(m), height: h });
+      cells.push({ x, z, w, d });
+      k++;
+    }
+  }
+  // Trees on the sidewalks
+  const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 2, 6), crownGeo = new THREE.ConeGeometry(1.5, 3.6, 7);
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5b3a1e }), crownMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32 });
+  for (const [a, b] of net.edges()) {
+    const A = net.node(a).pos, d = net.dir(a, b), r = rightOf(d);
+    for (let s = ISEC_HALF + 6; s < SPACING - ISEC_HALF - 4; s += 12) for (const side of [1, -1]) {
+      if (rand() < 0.35) continue;
+      const x = A.x + d.x * s + r.x * side * (ROAD_HALF + 2.5), z = A.z + d.z * s + r.z * side * (ROAD_HALF + 2.5);
+      if (cells.some((c) => Math.abs(c.x - x) < c.w / 2 + 1.5 && Math.abs(c.z - z) < c.d / 2 + 1.5)) continue;
+      const t = new THREE.Mesh(trunkGeo, trunkMat); t.position.set(x, 1, z);
+      const cr = new THREE.Mesh(crownGeo, crownMat); cr.position.set(x, 3.6, z); cr.castShadow = true;
+      scene.add(t, cr);
+    }
   }
 
-  console.info(`[world] seed=${layoutSeed} buildings=${buildings.length} trees=${trees.length}  (pin with ?seed=${layoutSeed})`);
+  const { start, dest } = pickTrip(net);
 
-  return { scene, launchPad, landingPad, padRadius: PAD_RADIUS, buildings, seed: layoutSeed };
+  // Markers
+  const marker = (pos: Vec2, color: number, label: string) => {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.RingGeometry(5.2, 6, 48), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; g.add(ring);
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const ctx = c.getContext('2d')!; ctx.fillStyle = '#' + color.toString(16).padStart(6, '0'); ctx.font = 'bold 100px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, 64, 70);
+    const letter = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+    letter.rotation.x = -Math.PI / 2; letter.position.y = 0.06; g.add(letter);
+    const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.8, 70, 12, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+    beacon.position.y = 35; g.add(beacon);
+    g.position.set(pos.x, 0, pos.z);
+    scene.add(g);
+  };
+  const sd = net.dir(start.u, start.v), sp = net.laneStart(start.u, start.v);
+  marker({ x: sp.x + sd.x * 4, z: sp.z + sd.z * 4 }, 0x3ddc97, 'A');
+  marker(dest.pos, 0xff8a3d, 'B');
+
+  console.info(`[world] seed=${seed} streets=${net.edges().length} buildings=${buildings.length} (pin with ?seed=${seed})`);
+
+  return {
+    scene, net, buildings, seed, start, dest,
+    updateLights(t) {
+      for (const b of lightBulbs) {
+        const state = net.light(b.node, b.dir, t);
+        (b.mesh.material as THREE.MeshBasicMaterial).color.setHex(state === b.color ? bulbOn[b.color] : bulbOff[b.color]);
+      }
+    },
+  };
 }

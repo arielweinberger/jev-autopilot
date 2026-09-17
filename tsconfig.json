@@ -10,5 +10,5 @@
     "esModuleInterop": true,
     "isolatedModules": true
   },
-  "include": ["src", "server", "api", "vite.config.ts"]
+  "include": ["src", "server", "api", "scripts/headless.ts", "vite.config.ts"]
 }

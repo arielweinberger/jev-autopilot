@@ -1,130 +1,105 @@
 import { experimental_evaluate as evaluate } from 'ai';
 import { createTypeSafeAi } from '@ai-sdk/typesafe-ai';
-import type { Telemetry, PilotResponse, ChoiceAnswer } from '../src/types';
+import type { Telemetry, PilotResponse, ChoiceAnswer, Maneuver } from '../src/types';
 
 /**
- * Turns raw telemetry into a situation report Jev can reason about.
- * Jev is a System One model: strong at semantic judgment, weak at arithmetic.
- * So code does the math and hands over plain-language facts plus rounded numbers.
+ * Turns telemetry into a situation report a driver could act on.
+ * Jev is a System One model: strong at judgment, deliberately weak at arithmetic.
+ * Code does every comparison and hands over plain-language facts plus rounded numbers.
  */
 function describe(t: Telemetry) {
   const abs = Math.abs;
   const r = (n: number, d = 0) => Number(n.toFixed(d));
-
-  const side = t.bearingToPad > 0 ? 'right' : 'left';
-  const bearingWords =
-    t.distanceToPad < t.padRadius
-      ? 'the drone is over the pad, so heading no longer matters; keep the nose still'
-      : abs(t.bearingToPad) < 5
-      ? 'the pad is straight ahead, nose is pointing at it'
-      : abs(t.bearingToPad) < 20
-        ? `the pad is slightly to the ${side} of the nose`
-        : abs(t.bearingToPad) < 60
-          ? `the pad is clearly to the ${side}, a turn is needed`
-          : abs(t.bearingToPad) < 120
-            ? `the pad is far to the ${side}, almost sideways`
-            : `the pad is behind the drone, a large turn is needed`;
-
-  const distanceWords =
-    t.distanceToPad < t.padRadius * 0.5
-      ? 'directly over the center of the landing pad'
-      : t.distanceToPad < t.padRadius
-        ? 'over the landing pad, near its edge'
-        : t.distanceToPad < 8
-          ? 'very close to the pad, a few meters off'
-          : t.distanceToPad < 25
-            ? 'close to the pad, final approach range'
-            : t.distanceToPad < 80
-              ? 'a medium distance from the pad'
-              : 'far from the pad, still in cruise';
-
-  const altitudeWords =
-    t.altitude < 0.3
-      ? 'on the ground'
-      : t.altitude < 2
-        ? 'barely off the ground, very low'
-        : t.altitude < t.cruiseAltitude * 0.6
-          ? 'low, well below cruise altitude'
-          : t.altitude < t.cruiseAltitude * 0.9
-            ? 'a bit below cruise altitude'
-            : t.altitude < t.cruiseAltitude * 1.15
-              ? 'at cruise altitude'
-              : t.altitude < t.cruiseAltitude * 1.6
-                ? 'above cruise altitude'
-                : 'much too high, far above cruise altitude';
-
-  const vsWords =
-    t.verticalSpeed > 1.5
-      ? 'climbing fast'
-      : t.verticalSpeed > 0.3
-        ? 'climbing gently'
-        : t.verticalSpeed < -2.5
-          ? 'descending dangerously fast'
-          : t.verticalSpeed < -0.8
-            ? 'descending'
-            : t.verticalSpeed < -0.2
-              ? 'sinking slowly'
-              : 'holding altitude';
+  const side = (v: number) => (v > 0 ? 'right' : 'left');
 
   const speedWords =
-    t.groundSpeed < 0.5
-      ? 'hovering, almost no horizontal motion'
-      : t.groundSpeed < 2.5
-        ? 'moving slowly'
-        : t.groundSpeed < 7
-          ? 'moving at a moderate speed'
-          : 'moving fast';
+    t.speedKmh < 1 ? 'the car is stopped' : t.speedKmh < 8 ? 'crawling' : t.speedKmh < 25 ? 'driving slowly' : t.speedKmh < 45 ? 'driving at a moderate speed' : 'driving fast, at or above the 50 km/h limit';
+  const diff = t.speedKmh - t.advisedSpeedKmh;
+  const speedVerdict =
+    t.advisedSpeedKmh < 1
+      ? t.speedKmh < 1
+        ? 'the right speed here is zero and the car is stopped: hold the brake'
+        : 'the car must come to a complete stop here: brake'
+      : diff < -12
+        ? `the right speed here is about ${r(t.advisedSpeedKmh)} km/h: the car is MUCH TOO SLOW, press the gas`
+        : diff < -4
+          ? `the right speed here is about ${r(t.advisedSpeedKmh)} km/h: the car is a little slow, add some gas`
+          : diff > 12
+            ? `the right speed here is about ${r(t.advisedSpeedKmh)} km/h: the car is MUCH TOO FAST, brake`
+            : diff > 4
+              ? `the right speed here is about ${r(t.advisedSpeedKmh)} km/h: the car is a little fast, ease off or brake gently`
+              : `the right speed here is about ${r(t.advisedSpeedKmh)} km/h: the speed is about right, hold it`;
 
-  const lateralWords =
-    abs(t.velocityRight) < 0.4
-      ? 'no sideways drift'
-      : `drifting to the ${t.velocityRight > 0 ? 'right' : 'left'} at ${r(abs(t.velocityRight), 1)} m/s`;
+  const laneWords =
+    abs(t.laneOffset) < 0.4
+      ? 'centered in the lane'
+      : abs(t.laneOffset) < 1.3
+        ? `slightly ${side(t.laneOffset)} of the lane center, by ${r(abs(t.laneOffset), 1)} m`
+        : abs(t.laneOffset) < 2.6
+          ? `well ${side(t.laneOffset)} of the lane center, by ${r(abs(t.laneOffset), 1)} m`
+          : `far ${side(t.laneOffset)} of the lane, ${r(abs(t.laneOffset), 1)} m off center, close to leaving the road`;
 
-  const forwardMotion =
-    t.velocityForward > 0.4
-      ? `flying forward at ${r(t.velocityForward, 1)} m/s`
-      : t.velocityForward < -0.4
-        ? `flying backward at ${r(abs(t.velocityForward), 1)} m/s`
-        : 'no forward motion';
+  const headingWords =
+    abs(t.headingError) < 3
+      ? 'pointing straight along the lane'
+      : abs(t.headingError) < 10
+        ? `pointing slightly ${side(t.headingError)} of the lane direction`
+        : abs(t.headingError) < 25
+          ? `pointing clearly ${side(t.headingError)} of the lane direction, by ${r(abs(t.headingError))} degrees`
+          : `pointing sharply ${side(t.headingError)} of the lane direction, by ${r(abs(t.headingError))} degrees`;
 
-  const padOffsetWords =
-    t.distanceToPad < 1.5
-      ? 'the drone is within a meter of the pad center; no horizontal correction is needed'
-      : t.distanceToPad < 12
-      ? `relative to the nose, the pad center is ${r(t.padForward, 1)} m ${t.padForward >= 0 ? 'ahead' : 'behind'} and ${r(abs(t.padRight), 1)} m to the ${t.padRight >= 0 ? 'right' : 'left'}`
-      : 'not close enough to the pad for a precise offset';
+  const near = t.lookaheadRight, farr = t.lookaheadFarRight;
+  const roadAhead =
+    abs(near) < 0.5 && abs(farr) < 1
+      ? 'the lane center runs straight ahead of the car'
+      : `to be on the lane center 10 m ahead, the car must move ${r(abs(near), 1)} m to the ${side(near)}; 22 m ahead the lane center is ${r(abs(farr), 1)} m to the ${side(farr)}` +
+        (abs(farr) > 4 ? ` — the road curves ${side(farr)} ahead` : '');
 
-  const obstacleWords =
-    t.obstacleAhead === null
-      ? 'no building in the forward path'
-      : t.obstacleAhead < 15
-        ? `a building is directly ahead only ${r(t.obstacleAhead)} m away, collision imminent unless the drone climbs or stops`
-        : `a building is ahead about ${r(t.obstacleAhead)} m away at the current altitude`;
+  const exits = [t.exits.left && 'left', t.exits.straight && 'straight', t.exits.right && 'right'].filter(Boolean).join(', ') || 'none';
+  const maneuverWord = t.plannedManeuver === 'turn_left' ? 'turn left' : t.plannedManeuver === 'turn_right' ? 'turn right' : t.plannedManeuver === 'go_straight' ? 'go straight' : null;
+  const intersection = t.inIntersection
+    ? `the car is inside the intersection${maneuverWord ? `, executing: ${maneuverWord}. Follow the lane center as described in roadAhead` : ''}`
+    : t.distanceToStopLine < 0
+      ? 'the car has just passed the stop line'
+      : `the stop line of the next intersection is ${r(t.distanceToStopLine)} m ahead (${t.distanceToStopLine < 12 ? 'very close' : t.distanceToStopLine < 30 ? 'close' : 'still some way off'}). Exits there: ${exits}. ` +
+        (maneuverWord ? `Planned maneuver: ${maneuverWord}.` : 'No maneuver chosen yet.');
 
-  const clearance = t.altitude - t.tallestObstacleOnPath;
-  const clearanceWords =
-    t.tallestObstacleOnPath <= 0
-      ? 'the direct path to the pad has no buildings'
-      : clearance > 5
-        ? `the drone is safely above every building on the direct path (tallest is ${r(t.tallestObstacleOnPath)} m)`
-        : `the drone is NOT above the buildings on the direct path (tallest is ${r(t.tallestObstacleOnPath)} m), it must climb before flying toward the pad`;
+  const room = t.distanceToStopLine - t.stoppingDistance;
+  const lightWords =
+    t.light === null || t.inIntersection || t.distanceToStopLine < 0
+      ? 'no traffic light applies right now'
+      : t.light === 'green'
+        ? `the traffic light facing the car is GREEN, ${r(t.distanceToStopLine)} m ahead: proceed`
+        : room > 30
+          ? `the traffic light facing the car is ${t.light.toUpperCase()} but still far away, ${r(t.distanceToStopLine)} m ahead. Braking is not needed yet: keep driving toward it at a moderate speed and it may change before the car arrives`
+          : `the traffic light facing the car is ${t.light.toUpperCase()}, ${r(t.distanceToStopLine)} m ahead. The car needs about ${r(t.stoppingDistance)} m to stop, so ` +
+            (room > 8 ? 'there is room: brake gently and stop before the line' : room > 0 ? 'it must brake firmly now to stop before the line' : 'it is too late to stop before the line');
+
+  const ahead = t.destBlocksAhead, rgt = t.destBlocksRight;
+  const dirWords =
+    abs(ahead) < 0.35 && abs(rgt) < 0.35
+      ? 'the destination is right here'
+      : `${abs(ahead) < 0.35 ? '' : `${r(abs(ahead), 1)} blocks ${ahead > 0 ? 'ahead' : 'behind'}`}${abs(ahead) >= 0.35 && abs(rgt) >= 0.35 ? ' and ' : ''}${abs(rgt) < 0.35 ? '' : `${r(abs(rgt), 1)} blocks to the ${side(rgt)}`}`;
+  const destination =
+    t.destinationAheadOnThisRoad !== null
+      ? t.distanceToDestination < 5
+        ? 'the car is AT the destination marker. Stop here and stay stopped.'
+        : `the destination is on THIS street, ${r(t.destinationAheadOnThisRoad)} m ahead. Drive up to it at the speed given in \`speed\` and stop exactly at it${t.stoppingDistance > t.destinationAheadOnThisRoad ? ' — brake now, the car needs more distance to stop than remains' : ''}.`
+      : `the destination is ${dirWords} (${r(t.distanceToDestination)} m away in a straight line). The city is a grid, so pick the exit that points toward it.`;
 
   return {
-    mission: 'Fly the quadcopter from the launch pad to the landing pad and land softly on its center.',
-    phase: t.phase,
-    position: distanceWords,
-    heading: bearingWords,
-    bearingToPadDegrees: r(t.bearingToPad),
-    distanceToPadMeters: r(t.distanceToPad, 1),
-    padOffset: padOffsetWords,
-    altitude: altitudeWords,
-    altitudeMeters: r(t.altitude, 1),
-    cruiseAltitudeMeters: r(t.cruiseAltitude),
-    verticalMotion: vsWords,
-    horizontalMotion: `${speedWords}; ${forwardMotion}; ${lateralWords}`,
-    obstacles: `${obstacleWords}. ${clearanceWords}.`,
+    mission: 'Drive the car from A to B through the city grid, stay in the right-hand lane, obey traffic lights, and stop at the destination marker.',
+    phase: t.phase === 'ready' ? 'ready: the car is parked at A with the engine running; press the gas to begin the trip' : t.phase,
+    speed: `${speedWords} (${r(t.speedKmh)} km/h). ${speedVerdict}. Stopping distance about ${r(t.stoppingDistance)} m.`,
+    lanePosition: laneWords,
+    heading: headingWords,
+    roadAhead,
+    intersection,
+    trafficLight: lightWords,
+    destination,
+    redLightsRunSoFar: t.redLightsRun,
     controls:
-      'DJI Mode 2 remote. Left stick up/down = climb/descend. Left stick left/right = turn the nose. Right stick up/down = fly forward/backward. Right stick left/right = slide sideways. Releasing all sticks makes the drone hover in place and self-level.',
+      'Steering wheel: left/right turns the car toward that side. Gas pedal accelerates. Brake pedal slows and stops. Automatic gearbox, forward only.',
   };
 }
 
@@ -137,87 +112,74 @@ export function createPilotHandler(apiKey: string | undefined) {
     const situation = describe(telemetry);
     const started = performance.now();
 
-    const result = await evaluate({
-      model,
-      state: situation,
-      questions: {
-        throttle: {
-          type: 'choice',
-          instructions:
-            'Which left-stick vertical input should the pilot apply right now to manage altitude? Consider `altitude`, `verticalMotion`, `obstacles` and `position`. Take off by climbing. Cruise at cruise altitude and never below the tallest building on the path. Only descend when over the pad. When over the pad, descend gently; descend faster when high, slower when close to the ground. On the ground after landing, hold.',
-          criteria: {
-            climb_fast: 'Push the left stick fully up. For takeoff, for climbing over a building, or when far below cruise altitude.',
-            climb: 'Push the left stick halfway up. For a gentle climb when a bit below cruise altitude.',
-            hold_altitude: 'Center the left stick. Keep the current altitude: at cruise altitude while flying to the pad, or when already on the ground.',
-            descend: 'Pull the left stick down a little. A gentle descent for landing when over the pad and within a few meters of the ground, or to correct being slightly above cruise altitude.',
-            descend_fast: 'Pull the left stick well down. A brisk descent when over the pad and still high up, or when far above cruise altitude and not over buildings.',
-          },
-        },
-        yaw: {
-          type: 'choice',
-          instructions:
-            'Which left-stick horizontal input should the pilot apply to point the nose at the landing pad? Use `heading` and `bearingToPadDegrees`. A positive bearing means the pad is to the right. When the pad is straight ahead, or the drone is over the pad, hold heading. Use hard turns only for large bearings.',
-          criteria: {
-            turn_left_hard: 'Full left. The pad is far to the left or behind.',
-            turn_left: 'Small left input. The pad is slightly or clearly to the left.',
-            hold_heading: 'Center. The pad is straight ahead, or the drone is over the pad and landing.',
-            turn_right: 'Small right input. The pad is slightly or clearly to the right.',
-            turn_right_hard: 'Full right. The pad is far to the right or behind.',
-          },
-        },
-        pitch: {
-          type: 'choice',
-          instructions:
-            'Which right-stick vertical input should the pilot apply to cover the distance to the pad? Use `position`, `heading`, `horizontalMotion`, `obstacles` and `altitude`. Do not fly forward while on the ground or barely off the ground, or while the nose points well away from the pad, or while a building is ahead and the drone is not above it. Slow down when close to the pad. When over the pad, use small inputs to stay centered, using `padOffset`.',
-          criteria: {
-            full_forward: 'Push the right stick fully forward. The pad is far away and straight ahead, the path is clear, and the drone is at cruise altitude.',
-            forward: 'Push the right stick forward a little. The pad is a medium or close distance ahead, or the drone is over the pad but the pad center is ahead of the nose.',
-            neutral: 'Center the right stick. Hovering over the pad center, climbing on takeoff, turning the nose toward the pad, or on the ground.',
-            pull_back: 'Pull the right stick back a little. The drone is close to the pad and moving forward too fast, or the pad center is slightly behind the nose.',
-            brake_hard: 'Pull the right stick fully back. The drone is moving fast and about to overshoot the pad, or a building is directly ahead and collision is imminent.',
-          },
-        },
-        roll: {
-          type: 'choice',
-          instructions:
-            'Which right-stick horizontal input should the pilot apply to correct sideways position? Use `padOffset` and `horizontalMotion`. Only use this when close to or over the pad; otherwise stay neutral and let yaw and pitch do the work. Counter sideways drift.',
-          criteria: {
-            slide_left: 'Right stick left. The pad center is to the left of the nose while close, or the drone is drifting right.',
-            neutral: 'Center. No sideways correction needed, or the drone is far from the pad.',
-            slide_right: 'Right stick right. The pad center is to the right of the nose while close, or the drone is drifting left.',
-          },
-        },
-        commitToLanding: {
-          type: 'boolean',
-          instructions:
-            'Should the pilot commit to landing now? True only when the drone is over the landing pad, moving slowly with no large sideways drift, and pointing roughly toward the pad center. See `position`, `horizontalMotion`, `padOffset`.',
-        },
-        cutMotors: {
-          type: 'boolean',
-          instructions:
-            'Has the drone touched down on the landing pad so the motors should be stopped? True only when `altitude` says it is on the ground AND `position` says it is over the landing pad.',
+    const exitCriteria: Partial<Record<Maneuver, string>> = {};
+    if (telemetry.exits.left) exitCriteria.turn_left = 'Turn left at the intersection onto the cross street.';
+    if (telemetry.exits.straight) exitCriteria.go_straight = 'Continue straight through the intersection.';
+    if (telemetry.exits.right) exitCriteria.turn_right = 'Turn right at the intersection onto the cross street.';
+    const askManeuver =
+      telemetry.plannedManeuver === null && !telemetry.inIntersection && telemetry.distanceToStopLine > 0 && telemetry.distanceToStopLine < 55 && Object.keys(exitCriteria).length >= 2;
+
+    const questions = {
+      steer: {
+        type: 'choice' as const,
+        instructions:
+          'Which steering input keeps the car on the lane center and follows the road? Use `roadAhead` first: steer toward the side the lane center ahead is on. Also use `lanePosition` and `heading`. Choose straight when the car is centered and pointing along the lane. Use the hard inputs only for a sharp turn inside an intersection or when the car is far off the lane.',
+        criteria: {
+          hard_left: 'Turn the wheel fully left. The lane center ahead is far to the left, such as a left turn inside an intersection.',
+          left: 'Turn the wheel a little left. The lane center ahead is somewhat to the left, or the car points right of the lane.',
+          straight: 'Hold the wheel centered. The car is on the lane center and pointing along it.',
+          right: 'Turn the wheel a little right. The lane center ahead is somewhat to the right, or the car points left of the lane.',
+          hard_right: 'Turn the wheel fully right. The lane center ahead is far to the right, such as a right turn inside an intersection.',
         },
       },
-    });
+      pedal: {
+        type: 'choice' as const,
+        instructions:
+          'Which pedal input is right now? `speed` states the right speed for this spot and whether the car is too slow, too fast, or about right: follow that verdict. Too slow means gas; too fast means brake; about right means coast or a touch of gas to hold speed; must stop means brake. Use `trafficLight` and `destination` to judge how hard: brake hard only when a stop is close, accelerate hard only on a clear straight road well below the limit.',
+        criteria: {
+          accelerate_hard: 'Press the gas fully. The road ahead is clear, the light is green or absent, no turn or destination is near, and the car is well below the limit.',
+          accelerate: 'Press the gas gently. Keep speed up on a clear road near the limit, or move off from a stop, or roll through a green intersection.',
+          coast: 'No pedal. Speed is fine and nothing requires braking, or the car is creeping through a turn at the right speed.',
+          brake: 'Press the brake gently. Slow down for an upcoming turn, for a red light that is still far, or for the destination ahead.',
+          brake_hard: 'Press the brake fully. A red light or the destination is close and the car must stop now, or the car is stopped at the destination and should stay stopped.',
+        },
+      },
+      arrived: {
+        type: 'boolean' as const,
+        instructions: 'The car is stopped at the destination and the trip is complete. True only when `destination` says the car is AT the destination marker and `speed` says it is stopped.',
+      },
+      ...(askManeuver
+        ? {
+            maneuver: {
+              type: 'choice' as const,
+              instructions:
+                'Which way should the car go at the upcoming intersection to get closer to the destination? Use `destination`. Only the listed exits exist. If the destination is ahead, go straight. If it is mostly to the right, turn right. If it is mostly to the left, turn left. If it is behind, turn toward whichever side it is on.',
+              criteria: exitCriteria as Record<Maneuver, string>,
+            },
+          }
+        : {}),
+    };
 
+    const result = await evaluate({ model, state: situation, questions });
     const latencyMs = performance.now() - started;
     const conf = (result.providerMetadata?.typesafe as { confidence?: Record<string, number> } | undefined)?.confidence ?? {};
     const pick = <K extends string>(id: string, a: { choice: K; probabilities?: Record<K, number> }): ChoiceAnswer<K> => ({
       choice: a.choice,
-      // Fall back to a one-hot distribution if the provider omits probabilities.
       probabilities: a.probabilities ?? ({ [a.choice]: 1 } as Record<K, number>),
       confidence: conf[id] ?? null,
     });
-
-    const a = result.answers;
+    const a = result.answers as unknown as {
+      steer: { choice: keyof typeof questions.steer.criteria; probabilities?: Record<string, number> };
+      pedal: { choice: keyof typeof questions.pedal.criteria; probabilities?: Record<string, number> };
+      arrived: { probability: number };
+      maneuver?: { choice: Maneuver; probabilities?: Record<Maneuver, number> };
+    };
     return {
       answers: {
-        throttle: pick('throttle', a.throttle),
-        yaw: pick('yaw', a.yaw),
-        pitch: pick('pitch', a.pitch),
-        roll: pick('roll', a.roll),
-        commitToLanding: a.commitToLanding.probability,
-        cutMotors: a.cutMotors.probability,
+        steer: pick('steer', a.steer as { choice: keyof typeof questions.steer.criteria; probabilities?: Record<keyof typeof questions.steer.criteria, number> }),
+        pedal: pick('pedal', a.pedal as { choice: keyof typeof questions.pedal.criteria; probabilities?: Record<keyof typeof questions.pedal.criteria, number> }),
+        maneuver: a.maneuver ? pick('maneuver', a.maneuver) : undefined,
+        arrived: a.arrived.probability,
       },
       usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
       latencyMs,
