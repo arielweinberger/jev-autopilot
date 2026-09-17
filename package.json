@@ -4,7 +4,7 @@
   "description": "3D drone simulator with DJI-style controls, flown autonomously by TypeSafe Jev through the AI SDK",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc"
   },

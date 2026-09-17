@@ -8,8 +8,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "isolatedModules": true,
-    "types": ["node", "vite/client"]
+    "isolatedModules": true
   },
   "include": ["src", "server", "api", "vite.config.ts"]
 }

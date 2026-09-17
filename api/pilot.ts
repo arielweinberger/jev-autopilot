@@ -1,4 +1,4 @@
-import { createPilotHandler } from '../server/pilot';
+import { createPilotHandler } from '../server/pilot.js';
 import type { Telemetry } from '../src/types';
 
 // Vercel serverless function. Locally the same handler runs as Vite middleware (vite.config.ts).
